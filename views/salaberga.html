@@ -26,7 +26,10 @@
   --shadow: 0 1px 8px rgba(0,0,0,.07);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { 
+  box-sizing: border-box;
+   margin: 0; 
+   padding: 0; }
 
 body {
   font-family: 'Inter', sans-serif;
@@ -60,8 +63,12 @@ body {
 .sidebar {
   width: var(--sidebar);
   background: var(--g900);
-  display: flex; flex-direction: column;
-  position: fixed; top: 0; left: 0; bottom: 0;
+  display: flex; 
+  flex-direction: column;
+  position: fixed; 
+  top: 0; 
+  left: 0; 
+  bottom: 0;
   z-index: 100;
 }
 
@@ -88,8 +95,8 @@ body {
 .sidebar-brand span {
   font-size: 16px;
    font-weight: 600;
-    color: white; 
-    letter-spacing: .3px;
+  color: white; 
+  letter-spacing: .3px;
 }
 
 .nav-section {
@@ -107,7 +114,8 @@ body {
   gap: 9px;
   padding: 9px 18px;
   color: rgba(255,255,255,.65);
-  font-size: 13px; font-weight: 400;
+  font-size: 13px; 
+  font-weight: 400;
   cursor: pointer;
   border-left: 2px solid transparent;
   transition: all .15s;
@@ -126,7 +134,8 @@ color: white;
 }
 
 .nav-item i {
-   font-size: 15px; opacity: .8;
+   font-size: 15px; 
+   opacity: .8;
    }
 
 .nav-item.active i { 
@@ -180,11 +189,13 @@ color: white;
 
 .main {
   margin-left: var(--sidebar);
-  flex: 1; padding: 28px 32px;
+  flex: 1; 
+  padding: 28px 32px;
 }
 
 .page { 
-  display: none; animation: fadeUp .25s ease both; 
+  display: none; 
+  animation: fadeUp .25s ease both; 
 }
 
 .page.active { 
@@ -253,7 +264,8 @@ color: white;
    background: #fee2e2; 
 }
 
-.btn-sm { padding: 4px 10px; 
+.btn-sm { 
+  padding: 4px 10px; 
   font-size: 12px; 
 }
 

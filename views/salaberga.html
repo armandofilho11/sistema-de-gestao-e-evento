@@ -54,9 +54,18 @@ body {
   transition: all .25s; 
   pointer-events: none;
 }
-#toast.show { opacity: 1; transform: translateY(0); }
-#toast.ok  { background: var(--g700); }
-#toast.err { background: #dc2626; }
+#toast.show {
+   opacity: 1; 
+   transform: translateY(0); 
+  }
+
+#toast.ok  { 
+  background: var(--g700); 
+}
+
+#toast.err { 
+  background: #dc2626; 
+}
 
 .app-layout { display: flex; min-height: 100vh; }
 

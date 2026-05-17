@@ -1,4 +1,4 @@
-const API = '/SISTEMA-DE-GESTAO-E-EVENTO/public/index.php';
+const API = '/sistema-de-gestao-e-evento/public/index.php';
 
 async function api(ep, method = 'GET', body = null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };

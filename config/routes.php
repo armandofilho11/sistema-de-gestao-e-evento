@@ -22,8 +22,9 @@ require_once __DIR__ . '/../app/controllers/ProgamacaoController.php';
 require_once __DIR__ . '/../app/controllers/DashboardController.php';
 require_once __DIR__ . '/../app/controllers/RelacoesController.php';
 
-$uri    = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$uri = rtrim(str_replace('/SISTEMA-DE-GESTAO-E-EVENTO/public', '', $uri), '/');
+$uri = $_GET['route'] 
+    ?? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$uri = rtrim(str_replace('/sistema-de-gestao-e-evento/public', '', $uri), '/');
 $method = metodo();
 
 $routes = [

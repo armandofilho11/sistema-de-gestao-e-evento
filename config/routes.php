@@ -23,7 +23,7 @@ require_once __DIR__ . '/../app/controllers/DashboardController.php';
 require_once __DIR__ . '/../app/controllers/RelacoesController.php';
 
 $uri    = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$uri    = rtrim(str_replace('/salaberga_mvc/public', '', $uri), '/');
+$uri = rtrim(str_replace('/SISTEMA-DE-GESTAO-E-EVENTO/public', '', $uri), '/');
 $method = metodo();
 
 $routes = [

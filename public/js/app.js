@@ -1,17 +1,20 @@
-const API = 'api';
+const API = '/SISTEMA-DE-GESTAO-E-EVENTO/public/index.php';
 
 async function api(ep, method = 'GET', body = null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   try {
-    const res  = await fetch(`${API}/${ep}`, opts);
+    const res = await fetch(`${API}/${ep}`, opts);
     return await res.json();
-  } catch { return { sucesso: false, erro: 'Erro de conexão' }; }
+  } catch {
+    return { sucesso: false, erro: 'Erro de conexão' };
+  }
 }
-const get  = ep       => api(ep);
-const post = (ep, b)  => api(ep, 'POST', b);
-const put  = (ep, b)  => api(ep, 'PUT',  b);
-const del  = ep       => api(ep, 'DELETE');
+
+const get  = ep      => api(ep);
+const post = (ep, b) => api(ep, 'POST', b);
+const put  = (ep, b) => api(ep, 'PUT',  b);
+const del  = ep      => api(ep, 'DELETE');
 
 function toast(msg, tipo = 'ok') {
   const t = document.getElementById('toast');
@@ -62,12 +65,18 @@ function emptyState(msg = 'Nenhum registro encontrado') {
 
 const tableWrap = html => `<div class="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">${html}</div>`;
 
+const thClass = 'text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[.06em] text-gray-500';
+const tdClass = 'px-4 py-[11px] text-sm border-b border-gray-100';
+
 const carregadores = {
-  inicio: carregarDashboard, eventos: carregarEventos,
+  inicio:        carregarDashboard,
+  eventos:       carregarEventos,
   participantes: () => carregarParticipantes(''),
-  projetos: carregarProjetos, turmas: carregarTurmas,
-  espacos: carregarEspacos, programacao: carregarProgramacao,
-  relatorios: carregarRelatorios,
+  projetos:      carregarProjetos,
+  turmas:        carregarTurmas,
+  espacos:       carregarEspacos,
+  programacao:   carregarProgramacao,
+  relatorios:    carregarRelatorios,
 };
 
 function goTo(page, el) {
@@ -79,17 +88,71 @@ function goTo(page, el) {
 }
 
 function setTab(btn) {
-  btn.closest('.tabs, [class*="flex gap"]').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.closest('.flex').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
 }
 
 function selectCat(btn) {
-  btn.closest('[class*="flex gap"]').querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.closest('.flex').querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 }
 
+async function popularSelect(selectId, ep, valKey, labelKey, selecionado = null, comVazio = false) {
+  const sel = document.getElementById(selectId);
+  sel.innerHTML = '<option value="">Carregando...</option>';
+  const res = await get(ep);
+  if (!res.sucesso) { sel.innerHTML = '<option value="">Erro ao carregar</option>'; return; }
+  let opts = comVazio ? '<option value="">— Nenhum —</option>' : '';
+  res.dados.forEach(item => {
+    const s = selecionado && String(item[valKey]) === String(selecionado) ? 'selected' : '';
+    opts += `<option value="${item[valKey]}" ${s}>${item[labelKey]}</option>`;
+  });
+  sel.innerHTML = opts;
+}
+
+let calState = { ano: new Date().getFullYear(), mes: new Date().getMonth() };
+let calDias  = [];
+
+function calMes(d) {
+  calState.mes += d;
+  if (calState.mes > 11) { calState.mes = 0; calState.ano++; }
+  if (calState.mes < 0)  { calState.mes = 11; calState.ano--; }
+  renderCal(calDias);
+}
+
+function renderCal(dias) {
+  calDias = dias;
+  const { ano, mes } = calState;
+  const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  document.getElementById('cal-label').textContent = `${meses[mes]} ${ano}`;
+
+  const offset = ((new Date(ano, mes, 1).getDay() + 6) % 7);
+  const total  = new Date(ano, mes + 1, 0).getDate();
+  const hoje   = new Date();
+
+  let html = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map(n =>
+    `<div class="text-[10px] text-gray-500 font-semibold py-[3px]">${n}</div>`
+  ).join('');
+
+  for (let i = 0; i < offset; i++) html += '<div class="cal-d text-xs py-[5px] rounded"></div>';
+
+  for (let d = 1; d <= total; d++) {
+    const str    = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isHoje = d === hoje.getDate() && ano === hoje.getFullYear() && mes === hoje.getMonth();
+    const cls    = isHoje ? 'today' : dias.includes(str) ? 'ev' : '';
+    html += `<div class="cal-d text-xs py-[5px] px-0.5 rounded cursor-pointer ${cls}">${d}</div>`;
+  }
+  document.getElementById('cal-grid').innerHTML = html;
+}
+
+function fmt(data) {
+  if (!data) return '—';
+  const [y, m, d] = data.split('-');
+  return `${d}/${m}/${y}`;
+}
+
 async function carregarDashboard() {
-  const res = await get('dashboard.php');
+  const res = await get('dashboard');
   if (!res.sucesso) return;
   const d = res.dados;
 
@@ -122,69 +185,22 @@ async function carregarDashboard() {
 
 async function carregarRelatorios() { await carregarDashboard(); }
 
-let calState = { ano: new Date().getFullYear(), mes: new Date().getMonth() };
-let calDias  = [];
-
-function calMes(d) {
-  calState.mes += d;
-  if (calState.mes > 11) { calState.mes = 0; calState.ano++; }
-  if (calState.mes < 0)  { calState.mes = 11; calState.ano--; }
-  renderCal(calDias);
-}
-
-function renderCal(dias) {
-  calDias = dias;
-  const { ano, mes } = calState;
-  const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  document.getElementById('cal-label').textContent = `${meses[mes]} ${ano}`;
-
-  const offset   = ((new Date(ano, mes, 1).getDay() + 6) % 7);
-  const total    = new Date(ano, mes + 1, 0).getDate();
-  const hoje     = new Date();
-
-  let html = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'].map(n => `<div class="text-[10px] text-gray-500 font-semibold py-[3px]">${n}</div>`).join('');
-  for (let i = 0; i < offset; i++) html += '<div class="cal-d text-xs py-[5px] rounded"></div>';
-  for (let d = 1; d <= total; d++) {
-    const str   = `${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const isHoje = d === hoje.getDate() && ano === hoje.getFullYear() && mes === hoje.getMonth();
-    const cls    = isHoje ? 'today' : dias.includes(str) ? 'ev' : '';
-    html += `<div class="cal-d text-xs py-[5px] px-0.5 rounded cursor-pointer ${cls}">${d}</div>`;
-  }
-  document.getElementById('cal-grid').innerHTML = html;
-}
-
-function fmt(data) {
-  if (!data) return '—';
-  const [y,m,d] = data.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-async function popularSelect(selectId, ep, valKey, labelKey, selecionado = null, comVazio = false) {
-  const sel = document.getElementById(selectId);
-  sel.innerHTML = '<option value="">Carregando...</option>';
-  const res = await get(ep);
-  if (!res.sucesso) { sel.innerHTML = '<option value="">Erro</option>'; return; }
-  let opts = comVazio ? '<option value="">— Nenhum —</option>' : '';
-  res.dados.forEach(item => {
-    const sel2 = selecionado && String(item[valKey]) === String(selecionado) ? 'selected' : '';
-    opts += `<option value="${item[valKey]}" ${sel2}>${item[labelKey]}</option>`;
-  });
-  sel.innerHTML = opts;
-}
-
-const thClass = 'text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[.06em] text-gray-500';
-const tdClass = 'px-4 py-[11px] text-sm border-b border-gray-100';
-
 async function carregarEventos() {
   const busca = document.getElementById('busca-eventos')?.value || '';
-  const res   = await get(`eventos.php?busca=${encodeURIComponent(busca)}`);
+  const res   = await get(`eventos?busca=${encodeURIComponent(busca)}`);
   const el    = document.getElementById('tabela-eventos');
   if (!res.sucesso || !res.dados.length) {
     el.innerHTML = tableWrap(emptyState('Nenhum evento encontrado')); return;
   }
   el.innerHTML = tableWrap(`<table class="w-full border-collapse">
     <thead class="bg-gray-50 border-b border-gray-200">
-      <tr><th class="${thClass}">Nome</th><th class="${thClass}">Data</th><th class="${thClass}">Criado por</th><th class="${thClass}">Status</th><th class="${thClass}">Ações</th></tr>
+      <tr>
+        <th class="${thClass}">Nome</th>
+        <th class="${thClass}">Data</th>
+        <th class="${thClass}">Criado por</th>
+        <th class="${thClass}">Status</th>
+        <th class="${thClass}">Ações</th>
+      </tr>
     </thead>
     <tbody>${res.dados.map(e => `
       <tr>
@@ -192,7 +208,7 @@ async function carregarEventos() {
         <td class="${tdClass}">${fmt(e.data)}</td>
         <td class="${tdClass}">${e.criado_por || '—'}</td>
         <td class="${tdClass}">${badge(e.status)}</td>
-        <td class="${tdClass} last:border-0"><div class="flex gap-1">
+        <td class="${tdClass}"><div class="flex gap-1">
           <button class="inline-flex items-center gap-1 px-2.5 py-1 bg-white text-gray-900 border border-gray-200 rounded-lg text-xs font-medium cursor-pointer hover:bg-g50" onclick="editarEvento(${e.id_evento})"><i class="bi bi-pencil"></i></button>
           <button class="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium cursor-pointer hover:bg-red-100" onclick="excluirEvento(${e.id_evento},'${e.nome.replace(/'/g,"\\'")}')"><i class="bi bi-trash3"></i></button>
         </div></td>
@@ -203,16 +219,16 @@ async function carregarEventos() {
 
 async function openModalEvento() {
   document.getElementById('titulo-modal-evento').textContent = 'Criar Evento';
-  document.getElementById('evento-id').value    = '';
-  document.getElementById('evento-nome').value  = '';
-  document.getElementById('evento-data').value  = '';
-  document.getElementById('evento-status').value= 'rascunho';
-  await popularSelect('evento-usuario', 'usuarios.php', 'id_usuario', 'nome');
+  document.getElementById('evento-id').value     = '';
+  document.getElementById('evento-nome').value   = '';
+  document.getElementById('evento-data').value   = '';
+  document.getElementById('evento-status').value = 'rascunho';
+  await popularSelect('evento-usuario', 'usuarios', 'id_usuario', 'nome');
   openModal('modal-evento');
 }
 
 async function editarEvento(id) {
-  const res = await get(`eventos.php?id=${id}`);
+  const res = await get(`eventos/${id}`);
   if (!res.sucesso) { toast('Erro ao carregar evento', 'err'); return; }
   const e = res.dados;
   document.getElementById('titulo-modal-evento').textContent = 'Editar Evento';
@@ -220,7 +236,7 @@ async function editarEvento(id) {
   document.getElementById('evento-nome').value   = e.nome;
   document.getElementById('evento-data').value   = e.data;
   document.getElementById('evento-status').value = e.status;
-  await popularSelect('evento-usuario', 'usuarios.php', 'id_usuario', 'nome', e.id_usuario_criado);
+  await popularSelect('evento-usuario', 'usuarios', 'id_usuario', 'nome', e.id_usuario_criado);
   openModal('modal-evento');
 }
 
@@ -232,20 +248,28 @@ async function salvarEvento() {
     status:            document.getElementById('evento-status').value,
     id_usuario_criado: document.getElementById('evento-usuario').value,
   };
-  if (!dados.nome || !dados.data || !dados.id_usuario_criado) { toast('Preencha todos os campos', 'err'); return; }
-  const res = id ? await put(`eventos.php?id=${id}`, dados) : await post('eventos.php', dados);
+  if (!dados.nome || !dados.data || !dados.id_usuario_criado) {
+    toast('Preencha todos os campos obrigatórios', 'err'); return;
+  }
+  const res = id
+    ? await put(`eventos/${id}`, dados)
+    : await post('eventos', dados);
   if (res.sucesso) {
     closeModal('modal-evento');
     toast(id ? 'Evento atualizado!' : 'Evento criado!');
-    carregarEventos(); carregarDashboard();
-  } else toast(res.erro || 'Erro ao salvar', 'err');
+    carregarEventos();
+    carregarDashboard();
+  } else {
+    toast(res.erro || 'Erro ao salvar', 'err');
+  }
 }
 
 function excluirEvento(id, nome) {
   confirmarExclusao(nome, async () => {
-    const res = await del(`eventos.php?id=${id}`);
-    res.sucesso ? (toast('Evento excluído!'), carregarEventos(), carregarDashboard())
-                : toast(res.erro || 'Erro ao excluir', 'err');
+    const res = await del(`eventos/${id}`);
+    res.sucesso
+      ? (toast('Evento excluído!'), carregarEventos(), carregarDashboard())
+      : toast(res.erro || 'Erro ao excluir', 'err');
   });
 }
 
@@ -254,23 +278,31 @@ let catFiltro = '';
 async function carregarParticipantes(cat) {
   if (cat !== undefined) catFiltro = cat;
   const busca = document.getElementById('busca-participantes')?.value || '';
-  const res   = await get(`participantes.php?busca=${encodeURIComponent(busca)}&categoria=${catFiltro}`);
+  const res   = await get(`participantes?busca=${encodeURIComponent(busca)}&categoria=${catFiltro}`);
   const el    = document.getElementById('tabela-participantes');
   if (!res.sucesso || !res.dados.length) {
     el.innerHTML = tableWrap(emptyState('Nenhum participante encontrado')); return;
   }
   el.innerHTML = tableWrap(`<table class="w-full border-collapse">
     <thead class="bg-gray-50 border-b border-gray-200">
-      <tr><th class="${thClass}">Nome</th><th class="${thClass}">Email</th><th class="${thClass}">Categoria</th><th class="${thClass}">Turma</th><th class="${thClass}">Projeto</th><th class="${thClass}">Evento</th><th class="${thClass}">Ações</th></tr>
+      <tr>
+        <th class="${thClass}">Nome</th>
+        <th class="${thClass}">Email</th>
+        <th class="${thClass}">Categoria</th>
+        <th class="${thClass}">Turma</th>
+        <th class="${thClass}">Projeto</th>
+        <th class="${thClass}">Evento</th>
+        <th class="${thClass}">Ações</th>
+      </tr>
     </thead>
     <tbody>${res.dados.map(p => `
       <tr>
         <td class="${tdClass}"><strong>${p.nome}</strong></td>
         <td class="${tdClass}">${p.email}</td>
         <td class="${tdClass}">${badge(p.categoria)}</td>
-        <td class="${tdClass}">${p.turma || '—'}</td>
+        <td class="${tdClass}">${p.turma   || '—'}</td>
         <td class="${tdClass}">${p.projeto || '—'}</td>
-        <td class="${tdClass}">${p.evento || '—'}</td>
+        <td class="${tdClass}">${p.evento  || '—'}</td>
         <td class="${tdClass}"><div class="flex gap-1">
           <button class="inline-flex items-center gap-1 px-2.5 py-1 bg-white text-gray-900 border border-gray-200 rounded-lg text-xs font-medium cursor-pointer hover:bg-g50" onclick="editarParticipante(${p.id_participacao})"><i class="bi bi-pencil"></i></button>
           <button class="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium cursor-pointer hover:bg-red-100" onclick="excluirParticipante(${p.id_participacao},'${p.nome.replace(/'/g,"\\'")}')"><i class="bi bi-trash3"></i></button>
@@ -285,15 +317,15 @@ async function abrirModalParticipante() {
   document.getElementById('participante-id').value = '';
   document.getElementById('part-nome').value  = '';
   document.getElementById('part-email').value = '';
-  document.querySelectorAll('#modal-participante .cat-btn').forEach((b,i) => b.classList.toggle('active', i===0));
-  await popularSelect('part-evento', 'eventos.php', 'id_evento', 'nome');
-  await popularSelect('part-turma',  'turmas.php',  'id_turma',  'nome', null, true);
-  await popularSelect('part-projeto','projetos.php','id_projeto','nome', null, true);
+  document.querySelectorAll('#modal-participante .cat-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  await popularSelect('part-evento', 'eventos',  'id_evento',  'nome');
+  await popularSelect('part-turma',  'turmas',   'id_turma',   'nome', null, true);
+  await popularSelect('part-projeto','projetos', 'id_projeto', 'nome', null, true);
   openModal('modal-participante');
 }
 
 async function editarParticipante(id) {
-  const res = await get(`participantes.php?id=${id}`);
+  const res = await get(`participantes/${id}`);
   if (!res.sucesso) return;
   const p = res.dados;
   document.getElementById('titulo-modal-participante').textContent = 'Editar Participante';
@@ -303,9 +335,9 @@ async function editarParticipante(id) {
   document.querySelectorAll('#modal-participante .cat-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.val === p.categoria)
   );
-  await popularSelect('part-evento', 'eventos.php', 'id_evento', 'nome', p.id_evento);
-  await popularSelect('part-turma',  'turmas.php',  'id_turma',  'nome', p.id_turma, true);
-  await popularSelect('part-projeto','projetos.php','id_projeto','nome', p.id_projeto, true);
+  await popularSelect('part-evento', 'eventos',  'id_evento',  'nome', p.id_evento);
+  await popularSelect('part-turma',  'turmas',   'id_turma',   'nome', p.id_turma,   true);
+  await popularSelect('part-projeto','projetos', 'id_projeto', 'nome', p.id_projeto, true);
   openModal('modal-participante');
 }
 
@@ -320,39 +352,52 @@ async function salvarParticipante() {
     id_turma:   document.getElementById('part-turma').value   || null,
     id_projeto: document.getElementById('part-projeto').value || null,
   };
-  if (!dados.nome || !dados.email || !dados.id_evento) { toast('Preencha os campos obrigatórios', 'err'); return; }
-  const res = id ? await put(`participantes.php?id=${id}`, dados) : await post('participantes.php', dados);
+  if (!dados.nome || !dados.email || !dados.id_evento) {
+    toast('Preencha os campos obrigatórios', 'err'); return;
+  }
+  const res = id
+    ? await put(`participantes/${id}`, dados)
+    : await post('participantes', dados);
   if (res.sucesso) {
     closeModal('modal-participante');
     toast(id ? 'Participante atualizado!' : 'Participante cadastrado!');
-    carregarParticipantes(); carregarDashboard();
-  } else toast(res.erro || 'Erro ao salvar', 'err');
+    carregarParticipantes();
+    carregarDashboard();
+  } else {
+    toast(res.erro || 'Erro ao salvar', 'err');
+  }
 }
 
 function excluirParticipante(id, nome) {
   confirmarExclusao(nome, async () => {
-    const res = await del(`participantes.php?id=${id}`);
-    res.sucesso ? (toast('Participante excluído!'), carregarParticipantes(), carregarDashboard())
-                : toast(res.erro || 'Erro', 'err');
+    const res = await del(`participantes/${id}`);
+    res.sucesso
+      ? (toast('Participante excluído!'), carregarParticipantes(), carregarDashboard())
+      : toast(res.erro || 'Erro', 'err');
   });
 }
 
 async function carregarProjetos() {
   const busca = document.getElementById('busca-projetos')?.value || '';
-  const res   = await get(`projetos.php?busca=${encodeURIComponent(busca)}`);
+  const res   = await get(`projetos?busca=${encodeURIComponent(busca)}`);
   const el    = document.getElementById('tabela-projetos');
   if (!res.sucesso || !res.dados.length) {
     el.innerHTML = tableWrap(emptyState('Nenhum projeto encontrado')); return;
   }
   el.innerHTML = tableWrap(`<table class="w-full border-collapse">
     <thead class="bg-gray-50 border-b border-gray-200">
-      <tr><th class="${thClass}">Nome</th><th class="${thClass}">Descrição</th><th class="${thClass}">Turmas</th><th class="${thClass}">Ações</th></tr>
+      <tr>
+        <th class="${thClass}">Nome</th>
+        <th class="${thClass}">Descrição</th>
+        <th class="${thClass}">Turmas</th>
+        <th class="${thClass}">Ações</th>
+      </tr>
     </thead>
     <tbody>${res.dados.map(p => `
       <tr>
         <td class="${tdClass}"><strong>${p.nome}</strong></td>
         <td class="${tdClass}">${p.descricao || '—'}</td>
-        <td class="${tdClass}">${p.turmas || '—'}</td>
+        <td class="${tdClass}">${p.turmas    || '—'}</td>
         <td class="${tdClass}"><div class="flex gap-1">
           <button class="inline-flex items-center gap-1 px-2.5 py-1 bg-white text-gray-900 border border-gray-200 rounded-lg text-xs font-medium cursor-pointer hover:bg-g50" onclick="editarProjeto(${p.id_projeto})"><i class="bi bi-pencil"></i></button>
           <button class="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium cursor-pointer hover:bg-red-100" onclick="excluirProjeto(${p.id_projeto},'${p.nome.replace(/'/g,"\\'")}')"><i class="bi bi-trash3"></i></button>
@@ -371,7 +416,7 @@ function openModalProjeto() {
 }
 
 async function editarProjeto(id) {
-  const res = await get(`projetos.php?id=${id}`);
+  const res = await get(`projetos/${id}`);
   if (!res.sucesso) return;
   const p = res.dados;
   document.getElementById('titulo-modal-projeto').textContent = 'Editar Projeto';
@@ -382,31 +427,51 @@ async function editarProjeto(id) {
 }
 
 async function salvarProjeto() {
-  const id   = document.getElementById('projeto-id').value;
-  const dados = { nome: document.getElementById('proj-nome').value.trim(), descricao: document.getElementById('proj-desc').value.trim() };
+  const id    = document.getElementById('projeto-id').value;
+  const dados = {
+    nome:      document.getElementById('proj-nome').value.trim(),
+    descricao: document.getElementById('proj-desc').value.trim(),
+  };
   if (!dados.nome) { toast('Nome é obrigatório', 'err'); return; }
-  const res = id ? await put(`projetos.php?id=${id}`, dados) : await post('projetos.php', dados);
-  if (res.sucesso) { closeModal('modal-projeto'); toast(id ? 'Projeto atualizado!' : 'Projeto criado!'); carregarProjetos(); carregarDashboard(); }
-  else toast(res.erro || 'Erro', 'err');
+  const res = id
+    ? await put(`projetos/${id}`, dados)
+    : await post('projetos', dados);
+  if (res.sucesso) {
+    closeModal('modal-projeto');
+    toast(id ? 'Projeto atualizado!' : 'Projeto criado!');
+    carregarProjetos();
+    carregarDashboard();
+  } else {
+    toast(res.erro || 'Erro', 'err');
+  }
 }
 
 function excluirProjeto(id, nome) {
   confirmarExclusao(nome, async () => {
-    const res = await del(`projetos.php?id=${id}`);
-    res.sucesso ? (toast('Projeto excluído!'), carregarProjetos(), carregarDashboard()) : toast(res.erro || 'Erro', 'err');
+    const res = await del(`projetos/${id}`);
+    res.sucesso
+      ? (toast('Projeto excluído!'), carregarProjetos(), carregarDashboard())
+      : toast(res.erro || 'Erro', 'err');
   });
 }
 
 async function carregarTurmas() {
   const busca = document.getElementById('busca-turmas')?.value || '';
-  const res   = await get(`turmas.php?busca=${encodeURIComponent(busca)}`);
+  const res   = await get(`turmas?busca=${encodeURIComponent(busca)}`);
   const el    = document.getElementById('tabela-turmas');
   if (!res.sucesso || !res.dados.length) {
     el.innerHTML = tableWrap(emptyState('Nenhuma turma encontrada')); return;
   }
   el.innerHTML = tableWrap(`<table class="w-full border-collapse">
     <thead class="bg-gray-50 border-b border-gray-200">
-      <tr><th class="${thClass}">Nome</th><th class="${thClass}">Curso</th><th class="${thClass}">Ano</th><th class="${thClass}">Participantes</th><th class="${thClass}">Projetos</th><th class="${thClass}">Ações</th></tr>
+      <tr>
+        <th class="${thClass}">Nome</th>
+        <th class="${thClass}">Curso</th>
+        <th class="${thClass}">Ano</th>
+        <th class="${thClass}">Participantes</th>
+        <th class="${thClass}">Projetos</th>
+        <th class="${thClass}">Ações</th>
+      </tr>
     </thead>
     <tbody>${res.dados.map(t => `
       <tr>
@@ -431,43 +496,64 @@ function openModalTurma() {
 }
 
 async function editarTurma(id) {
-  const res = await get(`turmas.php?id=${id}`);
+  const res = await get(`turmas/${id}`);
   if (!res.sucesso) return;
   const t = res.dados;
   document.getElementById('titulo-modal-turma').textContent = 'Editar Turma';
-  document.getElementById('turma-id').value   = t.id_turma;
-  document.getElementById('turma-nome').value = t.nome;
-  document.getElementById('turma-curso').value= t.curso;
-  document.getElementById('turma-ano').value  = t.ano;
+  document.getElementById('turma-id').value    = t.id_turma;
+  document.getElementById('turma-nome').value  = t.nome;
+  document.getElementById('turma-curso').value = t.curso;
+  document.getElementById('turma-ano').value   = t.ano;
   openModal('modal-turma');
 }
 
 async function salvarTurma() {
-  const id   = document.getElementById('turma-id').value;
-  const dados = { nome: document.getElementById('turma-nome').value.trim(), curso: document.getElementById('turma-curso').value.trim(), ano: document.getElementById('turma-ano').value };
-  if (!dados.nome || !dados.curso || !dados.ano) { toast('Preencha todos os campos', 'err'); return; }
-  const res = id ? await put(`turmas.php?id=${id}`, dados) : await post('turmas.php', dados);
-  if (res.sucesso) { closeModal('modal-turma'); toast(id ? 'Turma atualizada!' : 'Turma criada!'); carregarTurmas(); }
-  else toast(res.erro || 'Erro', 'err');
+  const id    = document.getElementById('turma-id').value;
+  const dados = {
+    nome:  document.getElementById('turma-nome').value.trim(),
+    curso: document.getElementById('turma-curso').value.trim(),
+    ano:   document.getElementById('turma-ano').value,
+  };
+  if (!dados.nome || !dados.curso || !dados.ano) {
+    toast('Preencha todos os campos', 'err'); return;
+  }
+  const res = id
+    ? await put(`turmas/${id}`, dados)
+    : await post('turmas', dados);
+  if (res.sucesso) {
+    closeModal('modal-turma');
+    toast(id ? 'Turma atualizada!' : 'Turma criada!');
+    carregarTurmas();
+  } else {
+    toast(res.erro || 'Erro', 'err');
+  }
 }
 
 function excluirTurma(id, nome) {
   confirmarExclusao(nome, async () => {
-    const res = await del(`turmas.php?id=${id}`);
-    res.sucesso ? (toast('Turma excluída!'), carregarTurmas()) : toast(res.erro || 'Erro', 'err');
+    const res = await del(`turmas/${id}`);
+    res.sucesso
+      ? (toast('Turma excluída!'), carregarTurmas())
+      : toast(res.erro || 'Erro', 'err');
   });
 }
 
 async function carregarEspacos() {
   const busca = document.getElementById('busca-espacos')?.value || '';
-  const res   = await get(`espacos.php?busca=${encodeURIComponent(busca)}`);
+  const res   = await get(`espacos?busca=${encodeURIComponent(busca)}`);
   const el    = document.getElementById('tabela-espacos');
   if (!res.sucesso || !res.dados.length) {
     el.innerHTML = tableWrap(emptyState('Nenhum espaço encontrado')); return;
   }
   el.innerHTML = tableWrap(`<table class="w-full border-collapse">
     <thead class="bg-gray-50 border-b border-gray-200">
-      <tr><th class="${thClass}">Nome</th><th class="${thClass}">Tipo</th><th class="${thClass}">Capacidade</th><th class="${thClass}">Status</th><th class="${thClass}">Ações</th></tr>
+      <tr>
+        <th class="${thClass}">Nome</th>
+        <th class="${thClass}">Tipo</th>
+        <th class="${thClass}">Capacidade</th>
+        <th class="${thClass}">Status</th>
+        <th class="${thClass}">Ações</th>
+      </tr>
     </thead>
     <tbody>${res.dados.map(e => `
       <tr>
@@ -493,7 +579,7 @@ function openModalEspaco() {
 }
 
 async function editarEspaco(id) {
-  const res = await get(`espacos.php?id=${id}`);
+  const res = await get(`espacos/${id}`);
   if (!res.sucesso) return;
   const e = res.dados;
   document.getElementById('titulo-modal-espaco').textContent = 'Editar Espaço';
@@ -506,31 +592,55 @@ async function editarEspaco(id) {
 }
 
 async function salvarEspaco() {
-  const id   = document.getElementById('espaco-id').value;
-  const dados = { nome: document.getElementById('esp-nome').value.trim(), tipo: document.getElementById('esp-tipo').value, capaciade: document.getElementById('esp-cap').value, status: document.getElementById('esp-status').value };
-  if (!dados.nome || !dados.capaciade) { toast('Preencha nome e capacidade', 'err'); return; }
-  const res = id ? await put(`espacos.php?id=${id}`, dados) : await post('espacos.php', dados);
-  if (res.sucesso) { closeModal('modal-espaco'); toast(id ? 'Espaço atualizado!' : 'Espaço criado!'); carregarEspacos(); carregarDashboard(); }
-  else toast(res.erro || 'Erro', 'err');
+  const id    = document.getElementById('espaco-id').value;
+  const dados = {
+    nome:      document.getElementById('esp-nome').value.trim(),
+    tipo:      document.getElementById('esp-tipo').value,
+    capaciade: document.getElementById('esp-cap').value,
+    status:    document.getElementById('esp-status').value,
+  };
+  if (!dados.nome || !dados.capaciade) {
+    toast('Preencha nome e capacidade', 'err'); return;
+  }
+  const res = id
+    ? await put(`espacos/${id}`, dados)
+    : await post('espacos', dados);
+  if (res.sucesso) {
+    closeModal('modal-espaco');
+    toast(id ? 'Espaço atualizado!' : 'Espaço criado!');
+    carregarEspacos();
+    carregarDashboard();
+  } else {
+    toast(res.erro || 'Erro', 'err');
+  }
 }
 
 function excluirEspaco(id, nome) {
   confirmarExclusao(nome, async () => {
-    const res = await del(`espacos.php?id=${id}`);
-    res.sucesso ? (toast('Espaço excluído!'), carregarEspacos(), carregarDashboard()) : toast(res.erro || 'Erro', 'err');
+    const res = await del(`espacos/${id}`);
+    res.sucesso
+      ? (toast('Espaço excluído!'), carregarEspacos(), carregarDashboard())
+      : toast(res.erro || 'Erro', 'err');
   });
 }
 
 async function carregarProgramacao() {
   const busca = document.getElementById('busca-prog')?.value || '';
-  const res   = await get(`progamacao.php?busca=${encodeURIComponent(busca)}`);
+  const res   = await get(`progamacao?busca=${encodeURIComponent(busca)}`);
   const el    = document.getElementById('tabela-programacao');
   if (!res.sucesso || !res.dados.length) {
     el.innerHTML = tableWrap(emptyState('Nenhuma atividade encontrada')); return;
   }
   el.innerHTML = tableWrap(`<table class="w-full border-collapse">
     <thead class="bg-gray-50 border-b border-gray-200">
-      <tr><th class="${thClass}">Horário</th><th class="${thClass}">Atividade</th><th class="${thClass}">Espaço</th><th class="${thClass}">Evento</th><th class="${thClass}">Status</th><th class="${thClass}">Ações</th></tr>
+      <tr>
+        <th class="${thClass}">Horário</th>
+        <th class="${thClass}">Atividade</th>
+        <th class="${thClass}">Espaço</th>
+        <th class="${thClass}">Evento</th>
+        <th class="${thClass}">Status</th>
+        <th class="${thClass}">Ações</th>
+      </tr>
     </thead>
     <tbody>${res.dados.map(p => `
       <tr>
@@ -552,13 +662,13 @@ async function abrirModalProgamacao() {
   document.getElementById('titulo-modal-prog').textContent = 'Adicionar Atividade';
   ['prog-id','prog-horario','prog-atividade'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('prog-status').value = 'agendado';
-  await popularSelect('prog-evento', 'eventos.php', 'id_evento', 'nome');
-  await popularSelect('prog-espaco', 'espacos.php', 'id_espaco', 'nome');
+  await popularSelect('prog-evento', 'eventos', 'id_evento', 'nome');
+  await popularSelect('prog-espaco', 'espacos', 'id_espaco', 'nome');
   openModal('modal-progamacao');
 }
 
 async function editarProgamacao(id) {
-  const res = await get(`progamacao.php?id=${id}`);
+  const res = await get(`progamacao/${id}`);
   if (!res.sucesso) return;
   const p = res.dados;
   document.getElementById('titulo-modal-prog').textContent = 'Editar Atividade';
@@ -566,24 +676,41 @@ async function editarProgamacao(id) {
   document.getElementById('prog-horario').value   = p.horario;
   document.getElementById('prog-atividade').value = p.atividade;
   document.getElementById('prog-status').value    = p.status;
-  await popularSelect('prog-evento', 'eventos.php', 'id_evento', 'nome', p.id_evento);
-  await popularSelect('prog-espaco', 'espacos.php', 'id_espaco', 'nome', p.id_espaco);
+  await popularSelect('prog-evento', 'eventos', 'id_evento', 'nome', p.id_evento);
+  await popularSelect('prog-espaco', 'espacos', 'id_espaco', 'nome', p.id_espaco);
   openModal('modal-progamacao');
 }
 
 async function salvarProgamacao() {
-  const id   = document.getElementById('prog-id').value;
-  const dados = { horario: document.getElementById('prog-horario').value, atividade: document.getElementById('prog-atividade').value.trim(), status: document.getElementById('prog-status').value, id_evento: document.getElementById('prog-evento').value, id_espaco: document.getElementById('prog-espaco').value };
-  if (!dados.horario || !dados.atividade || !dados.id_evento || !dados.id_espaco) { toast('Preencha todos os campos', 'err'); return; }
-  const res = id ? await put(`progamacao.php?id=${id}`, dados) : await post('progamacao.php', dados);
-  if (res.sucesso) { closeModal('modal-progamacao'); toast(id ? 'Atividade atualizada!' : 'Atividade criada!'); carregarProgramacao(); }
-  else toast(res.erro || 'Erro', 'err');
+  const id    = document.getElementById('prog-id').value;
+  const dados = {
+    horario:   document.getElementById('prog-horario').value,
+    atividade: document.getElementById('prog-atividade').value.trim(),
+    status:    document.getElementById('prog-status').value,
+    id_evento: document.getElementById('prog-evento').value,
+    id_espaco: document.getElementById('prog-espaco').value,
+  };
+  if (!dados.horario || !dados.atividade || !dados.id_evento || !dados.id_espaco) {
+    toast('Preencha todos os campos obrigatórios', 'err'); return;
+  }
+  const res = id
+    ? await put(`progamacao/${id}`, dados)
+    : await post('progamacao', dados);
+  if (res.sucesso) {
+    closeModal('modal-progamacao');
+    toast(id ? 'Atividade atualizada!' : 'Atividade criada!');
+    carregarProgramacao();
+  } else {
+    toast(res.erro || 'Erro', 'err');
+  }
 }
 
 function excluirProgamacao(id, nome) {
   confirmarExclusao(nome, async () => {
-    const res = await del(`progamacao.php?id=${id}`);
-    res.sucesso ? (toast('Atividade excluída!'), carregarProgramacao()) : toast(res.erro || 'Erro', 'err');
+    const res = await del(`progamacao/${id}`);
+    res.sucesso
+      ? (toast('Atividade excluída!'), carregarProgramacao())
+      : toast(res.erro || 'Erro', 'err');
   });
 }
 

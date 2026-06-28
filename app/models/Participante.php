@@ -1,63 +1,67 @@
 <?php
-class Usuario {
+class Participante {
     public function __construct(private PDO $db) {}
 
-    public function listar(string $busca = '', string $tipo = ''): array {
-        $sql    = "SELECT id_usuario, nome, email, tipo_usuario, criado_em FROM usuario WHERE 1=1";
+    public function listar(string $busca = '', string $categoria = '', int $id_evento = 0): array {
+        $sql    = "SELECT p.id_participacao, p.nome, p.email, p.categoria,
+                          e.nome AS evento, t.nome AS turma, pr.nome AS projeto
+                   FROM participante p
+                   LEFT JOIN evento  e  ON e.id_evento   = p.id_evento
+                   LEFT JOIN turma   t  ON t.id_turma    = p.id_turma
+                   LEFT JOIN projeto pr ON pr.id_projeto = p.id_projeto
+                   WHERE 1=1";
         $params = [];
-        if ($busca) { $sql .= " AND (nome LIKE ? OR email LIKE ?)"; $params[] = "%$busca%"; $params[] = "%$busca%"; }
-        if ($tipo)  { $sql .= " AND tipo_usuario = ?"; $params[] = $tipo; }
-        $sql .= " ORDER BY nome";
+        if ($busca)     { $sql .= " AND (p.nome LIKE ? OR p.email LIKE ?)"; $params[] = "%$busca%"; $params[] = "%$busca%"; }
+        if ($categoria) { $sql .= " AND p.categoria = ?"; $params[] = $categoria; }
+        if ($id_evento) { $sql .= " AND p.id_evento = ?"; $params[] = $id_evento; }
+        $sql .= " ORDER BY p.nome";
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchAll();
     }
 
     public function buscarPorId(int $id): array|false {
-        $stmt = $this->db->prepare("SELECT id_usuario, nome, email, tipo_usuario, criado_em FROM usuario WHERE id_usuario = ?");
+        $stmt = $this->db->prepare(
+            "SELECT p.*, e.nome AS evento, t.nome AS turma, pr.nome AS projeto
+             FROM participante p
+             LEFT JOIN evento  e  ON e.id_evento   = p.id_evento
+             LEFT JOIN turma   t  ON t.id_turma    = p.id_turma
+             LEFT JOIN projeto pr ON pr.id_projeto = p.id_projeto
+             WHERE p.id_participacao = ?"
+        );
         $stmt->execute([$id]);
         return $stmt->fetch();
     }
 
-    public function emailExiste(string $email, int $ignorarId = 0): bool {
-        $stmt = $this->db->prepare("SELECT id_usuario FROM usuario WHERE email = ? AND id_usuario != ?");
-        $stmt->execute([$email, $ignorarId]);
-        return (bool) $stmt->fetch();
-    }
-
-    public function criar(string $nome, string $email, string $senha, string $tipo): int {
-        $hash = password_hash($senha, PASSWORD_BCRYPT);
-        $this->db->prepare("INSERT INTO usuario (nome, email, senha, tipo_usuario, lembrar_sessao) VALUES (?, ?, ?, ?, 0)")
-                 ->execute([$nome, $email, $hash, $tipo]);
+    public function criar(string $nome, string $email, string $categoria, ?int $id_evento = null, ?int $id_turma = null, ?int $id_projeto = null): int {
+        $this->db->prepare(
+            "INSERT INTO participante (nome, email, categoria, id_evento, id_turma, id_projeto) VALUES (?, ?, ?, ?, ?, ?)"
+        )->execute([$nome, $email, $categoria, $id_evento, $id_turma, $id_projeto]);
         return (int) $this->db->lastInsertId();
     }
 
     public function atualizar(int $id, array $campos): void {
-        $sets   = [];
-        $params = [];
-        if (!empty($campos['nome']))         { $sets[] = 'nome = ?';         $params[] = $campos['nome']; }
-        if (!empty($campos['email']))        { $sets[] = 'email = ?';        $params[] = $campos['email']; }
-        if (!empty($campos['senha']))        { $sets[] = 'senha = ?';        $params[] = password_hash($campos['senha'], PASSWORD_BCRYPT); }
-        if (!empty($campos['tipo_usuario'])) { $sets[] = 'tipo_usuario = ?'; $params[] = $campos['tipo_usuario']; }
+        $sets = []; $params = [];
+        if (!empty($campos['nome']))      { $sets[] = 'nome = ?';      $params[] = $campos['nome']; }
+        if (!empty($campos['email']))     { $sets[] = 'email = ?';     $params[] = $campos['email']; }
+        if (!empty($campos['categoria'])) { $sets[] = 'categoria = ?'; $params[] = $campos['categoria']; }
+        if (array_key_exists('id_evento',  $campos)) { $sets[] = 'id_evento = ?';  $params[] = $campos['id_evento']  ?: null; }
+        if (array_key_exists('id_turma',   $campos)) { $sets[] = 'id_turma = ?';   $params[] = $campos['id_turma']   ?: null; }
+        if (array_key_exists('id_projeto', $campos)) { $sets[] = 'id_projeto = ?'; $params[] = $campos['id_projeto'] ?: null; }
         if (empty($sets)) return;
         $params[] = $id;
-        $this->db->prepare("UPDATE usuario SET " . implode(', ', $sets) . " WHERE id_usuario = ?")->execute($params);
+        $this->db->prepare("UPDATE participante SET " . implode(', ', $sets) . " WHERE id_participacao = ?")->execute($params);
     }
 
     public function deletar(int $id): int {
-        $stmt = $this->db->prepare("DELETE FROM usuario WHERE id_usuario = ?");
+        $stmt = $this->db->prepare("DELETE FROM participante WHERE id_participacao = ?");
         $stmt->execute([$id]);
         return $stmt->rowCount();
     }
 
-    public function buscarPorEmail(string $email): array|false {
-        $stmt = $this->db->prepare("SELECT * FROM usuario WHERE email = ? LIMIT 1");
-        $stmt->execute([$email]);
-        return $stmt->fetch();
-    }
-
-    public function atualizarLembrarSessao(int $id, bool $lembrar): void {
-        $this->db->prepare("UPDATE usuario SET lembrar_sessao = ? WHERE id_usuario = ?")
-                 ->execute([(int)$lembrar, $id]);
+    public function existe(int $id): bool {
+        $stmt = $this->db->prepare("SELECT id_participacao FROM participante WHERE id_participacao = ?");
+        $stmt->execute([$id]);
+        return (bool) $stmt->fetch();
     }
 }

@@ -26,17 +26,17 @@ class ProgamacaoController {
 
     public function store(): void {
         $data      = body();
-        $horario   = $data['horario']   ?? '';
-        $atividade = trim($data['atividade'] ?? '');
-        $status    = $data['status']    ?? 'agendado';
-        $id_evento = (int)($data['id_evento'] ?? 0);
-        $id_espaco = (int)($data['id_espaco'] ?? 0);
+        $horario   = $data['horario']            ?? '';
+        $atividade = trim($data['atividade']     ?? '');
+        $status    = $data['status']             ?? 'agendado';
+        $id_evento = (int)($data['id_evento']    ?? 0);
+        $id_espaco = (int)($data['id_espaco']    ?? 0);
 
         if (!$horario)   erro('Horário é obrigatório');
         if (!$atividade) erro('Atividade é obrigatória');
         if (!$id_evento) erro('id_evento é obrigatório');
         if (!$id_espaco) erro('id_espaco é obrigatório');
-        if (!in_array($status, ['agendado','em_andamento','concluido','cancelado'])) erro('Status inválido');
+        if (!in_array($status, ['agendado','confirmado','em_andamento','concluido','cancelado'])) erro('Status inválido');
         if (!$this->eventoModel->existe($id_evento)) erro('Evento não encontrado', 404);
         if (!$this->espacoModel->existe($id_espaco)) erro('Espaço não encontrado', 404);
 

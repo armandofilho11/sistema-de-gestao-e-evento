@@ -5,9 +5,23 @@ async function api(ep, method = 'GET', body = null) {
   if (body) opts.body = JSON.stringify(body);
   try {
     const res = await fetch(`${API}/${ep}`, opts);
-    return await res.json();
-  } catch {
-    return { sucesso: false, erro: 'Erro de conexão' };
+    
+    if (!res.ok) {
+      console.error(`Erro HTTP ${res.status}:`, res.statusText);
+      return { sucesso: false, erro: `Erro do servidor (${res.status})` };
+    }
+    
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error('Resposta não é JSON:', contentType);
+      return { sucesso: false, erro: 'Resposta inválida do servidor' };
+    }
+    
+    const data = await res.json();
+    return data;
+  } catch (erro) {
+    console.error('Erro na API:', erro);
+    return { sucesso: false, erro: 'Erro de conexão com o servidor' };
   }
 }
 
@@ -154,36 +168,46 @@ function fmt(data) {
 async function carregarDashboard() {
   const res = await get('dashboard');
   if (!res.sucesso) return;
-  const d = res.dados;
+  const d  = res.dados;
+  const ps = d.por_status || {};
 
-  document.getElementById('card-eventos').textContent       = d.totais.eventos;
-  document.getElementById('card-participantes').textContent = d.totais.participantes;
-  document.getElementById('card-projetos').textContent      = d.totais.projetos;
-  document.getElementById('card-espacos').textContent       = d.totais.espacos;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+  set('card-ativos',     ps.ativo     || 0);
+  set('card-encerrados', ps.encerrado || 0);
+  set('card-cancelados', ps.cancelado || 0);
+  set('card-espacos',    d.totais?.espacos || 0);
+  set('rel-ativo',       ps.ativo     || 0);
+  set('rel-encerrado',   ps.encerrado || 0);
+  set('rel-cancelado',   ps.cancelado || 0);
+  set('rel-ambientes',   d.totais?.espacos || 0);
 
   const lista = document.getElementById('proximos-lista');
-  if (!d.proximos_eventos?.length) {
-    lista.innerHTML = emptyState('Nenhum evento cadastrado');
-  } else {
-    lista.innerHTML = d.proximos_eventos.map(e => `
-      <div class="flex items-center gap-2.5 py-[9px] border-b border-gray-100 last:border-0">
-        <div class="w-1.5 h-1.5 rounded-full bg-g500 shrink-0"></div>
-        <div class="text-sm font-medium flex-1">${e.nome}</div>
-        <div class="text-[11px] text-gray-500 mr-1.5">${fmt(e.data)}</div>
-        ${badge(e.status)}
-      </div>`).join('');
+  if (lista) {
+    if (!d.proximos_eventos?.length) {
+      lista.innerHTML = emptyState('Nenhum evento cadastrado');
+    } else {
+      lista.innerHTML = d.proximos_eventos.map(e =>
+        '<div class="flex items-center gap-2.5 py-[9px] border-b border-gray-100 last:border-0">'
+        + '<div class="w-1.5 h-1.5 rounded-full bg-g500 shrink-0"></div>'
+        + '<div class="text-sm font-medium flex-1">' + e.nome + '</div>'
+        + '<div class="text-[11px] text-gray-500 mr-1.5">' + fmt(e.data) + '</div>'
+        + badge(e.status)
+        + '</div>'
+      ).join('');
+    }
   }
 
   renderCal(d.dias_com_eventos || []);
-
-  const ps = d.por_status || {};
-  document.getElementById('rel-encerrado').textContent = ps.encerrado || 0;
-  document.getElementById('rel-ativo').textContent     = ps.ativo     || 0;
-  document.getElementById('rel-rascunho').textContent  = ps.rascunho  || 0;
-  document.getElementById('rel-cancelado').textContent = ps.cancelado || 0;
 }
 
-async function carregarRelatorios() { await carregarDashboard(); }
+async function carregarRelatorios() {
+  await carregarDashboard();
+  await popularSelect('rel-espaco', 'espacos', 'id_espaco', 'nome', null, false);
+  await popularSelect('rel-turma',  'turmas',  'id_turma',  'nome', null, false);
+  await filtrarRelatorioEventos();
+  await filtrarRelatorioProjetos();
+}
 
 async function carregarEventos() {
   const busca = document.getElementById('busca-eventos')?.value || '';
@@ -217,51 +241,422 @@ async function carregarEventos() {
   </table>`);
 }
 
+// ===================== MODAL DE EVENTO (5 etapas, criação inline) =====================
+
+const RESP_TIPO_LABELS   = { estudante: 'Aluno', professor: 'Professor', coordenador: 'Coordenador', externo: 'Externo' };
+const ESPACO_TIPO_LABELS = { sala: 'Sala', auditorio: 'Auditório', quadra: 'Quadra', laboratorio: 'Laboratório', outro: 'Outro' };
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+let eventoState = {
+  step: 1,
+  espacos:      [], // {existing, id, nome, tipo, capacidade_max}
+  projetos:     [], // {existing, id, nome, descricao}
+  turmas:       [], // {existing, id, nome, curso, ano}
+  responsaveis: [], // {existing, id, nome, email, categoria}
+};
+
+function eventoResetState() {
+  eventoState = { step: 1, espacos: [], projetos: [], turmas: [], responsaveis: [] };
+}
+
+function eventoGoToStep(n) {
+  eventoState.step = n;
+  for (let i = 1; i <= 5; i++) {
+    document.getElementById('evento-step-' + i).classList.toggle('hidden', i !== n);
+    const dot = document.getElementById('step-dot-' + i);
+    dot.classList.toggle('bg-g500', i <= n);
+    dot.classList.toggle('bg-gray-200', i > n);
+  }
+  const labels = {
+    1: 'Etapa 1 de 5 — Informações',
+    2: 'Etapa 2 de 5 — Espaços',
+    3: 'Etapa 3 de 5 — Projetos',
+    4: 'Etapa 4 de 5 — Turmas',
+    5: 'Etapa 5 de 5 — Responsáveis',
+  };
+  document.getElementById('evento-step-label').textContent = labels[n];
+
+  document.getElementById('evento-btn-anterior').classList.toggle('hidden', n === 1);
+  document.getElementById('evento-btn-proximo').classList.toggle('hidden', n === 5);
+  document.getElementById('evento-btn-salvar').classList.toggle('hidden', n !== 5);
+}
+
+function eventoValidarStep1() {
+  const nome    = document.getElementById('evento-nome').value.trim();
+  const dIni    = document.getElementById('evento-data-inicio').value;
+  const dFim    = document.getElementById('evento-data-fim').value;
+  const hIni    = document.getElementById('evento-hora-inicio').value || '00:00';
+  const hFim    = document.getElementById('evento-hora-fim').value    || '23:59';
+  const usuario = document.getElementById('evento-usuario').value;
+  const erroEl  = document.getElementById('evento-data-erro');
+
+  if (!nome)    { toast('Informe o nome do evento', 'err'); return false; }
+  if (!dIni)    { toast('Informe a data de início', 'err'); return false; }
+  if (!dFim)    { toast('Informe a data de término', 'err'); return false; }
+  if (!usuario) { toast('Selecione quem está criando o evento', 'err'); return false; }
+
+  const inicio = new Date(dIni + 'T' + hIni);
+  const fim    = new Date(dFim + 'T' + hFim);
+
+  if (fim < inicio) {
+    erroEl.classList.remove('hidden');
+    toast('A data/horário de término não pode ser anterior ao início', 'err');
+    return false;
+  }
+  erroEl.classList.add('hidden');
+  return true;
+}
+
+function eventoStepProximo() {
+  if (eventoState.step === 1 && !eventoValidarStep1()) return;
+  if (eventoState.step < 5) eventoGoToStep(eventoState.step + 1);
+}
+
+function eventoStepAnterior() {
+  if (eventoState.step > 1) eventoGoToStep(eventoState.step - 1);
+}
+
+function atualizarItemEvento(grupo, idx, campo, valor) {
+  eventoState[grupo][idx][campo] = valor;
+}
+
+// ---- Step 2: Espaços (criação inline) ----
+
+function adicionarEspacoEvento() {
+  eventoState.espacos.push({ existing: false, id: null, nome: '', capacidade_max: '', tipo: 'sala' });
+  renderEspacosEvento();
+}
+
+function removerEspacoEvento(idx) {
+  eventoState.espacos.splice(idx, 1);
+  renderEspacosEvento();
+}
+
+function renderEspacosEvento() {
+  const container = document.getElementById('evento-espacos-lista');
+  if (!eventoState.espacos.length) {
+    container.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">Nenhum espaço adicionado ainda.</p>';
+    return;
+  }
+  container.innerHTML = eventoState.espacos.map(function(esp, idx) {
+    if (esp.existing) {
+      return '<div class="flex items-center gap-2 bg-g50 border border-g100 rounded-lg p-2.5">'
+        + '<i class="bi bi-geo-alt text-g700"></i>'
+        + '<div class="flex-1">'
+        +   '<span class="text-sm font-medium text-gray-900">' + esc(esp.nome) + '</span>'
+        +   '<span class="text-xs text-gray-400 ml-2">' + (ESPACO_TIPO_LABELS[esp.tipo] || esp.tipo) + ' · cap. ' + (esp.capacidade_max ?? '—') + '</span>'
+        + '</div>'
+        + '<span class="text-[10px] text-g700 bg-white border border-g100 px-1.5 py-0.5 rounded shrink-0">vinculado</span>'
+        + '<button type="button" onclick="removerEspacoEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1"><i class="bi bi-x-lg"></i></button>'
+        + '</div>';
+    }
+    const opts = ['sala','auditorio','quadra','laboratorio','outro'].map(function(t) {
+      return '<option value="' + t + '" ' + (esp.tipo === t ? 'selected' : '') + '>' + ESPACO_TIPO_LABELS[t] + '</option>';
+    }).join('');
+    return '<div class="border border-gray-200 rounded-lg p-2.5 bg-white">'
+      + '<div class="flex items-start gap-2">'
+      +   '<div class="flex-1 grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-2">'
+      +     '<input type="text" placeholder="Nome do espaço" value="' + esc(esp.nome) + '" oninput="atualizarItemEvento(\'espacos\',' + idx + ',\'nome\',this.value)" class="form-input px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +     '<input type="number" min="1" placeholder="Capacidade" value="' + esc(esp.capacidade_max) + '" oninput="atualizarItemEvento(\'espacos\',' + idx + ',\'capacidade_max\',this.value)" class="form-input px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +     '<select onchange="atualizarItemEvento(\'espacos\',' + idx + ',\'tipo\',this.value)" class="form-select px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">' + opts + '</select>'
+      +   '</div>'
+      +   '<button type="button" onclick="removerEspacoEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1 mt-1.5"><i class="bi bi-trash3"></i></button>'
+      + '</div></div>';
+  }).join('');
+}
+
+// ---- Step 3: Projetos (criação inline) ----
+
+function adicionarProjetoEvento() {
+  eventoState.projetos.push({ existing: false, id: null, nome: '', descricao: '' });
+  renderProjetosEvento();
+}
+
+function removerProjetoEvento(idx) {
+  eventoState.projetos.splice(idx, 1);
+  renderProjetosEvento();
+}
+
+function renderProjetosEvento() {
+  const container = document.getElementById('evento-projetos-lista');
+  if (!eventoState.projetos.length) {
+    container.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">Nenhum projeto adicionado ainda.</p>';
+    return;
+  }
+  container.innerHTML = eventoState.projetos.map(function(p, idx) {
+    if (p.existing) {
+      return '<div class="flex items-center gap-2 bg-g50 border border-g100 rounded-lg p-2.5">'
+        + '<i class="bi bi-folder2-open text-g700"></i>'
+        + '<span class="flex-1 text-sm font-medium text-gray-900">' + esc(p.nome) + '</span>'
+        + '<span class="text-[10px] text-g700 bg-white border border-g100 px-1.5 py-0.5 rounded shrink-0">vinculado</span>'
+        + '<button type="button" onclick="removerProjetoEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1"><i class="bi bi-x-lg"></i></button>'
+        + '</div>';
+    }
+    return '<div class="border border-gray-200 rounded-lg p-2.5 bg-white">'
+      + '<div class="flex items-start gap-2 mb-2">'
+      +   '<input type="text" placeholder="Nome do projeto" value="' + esc(p.nome) + '" oninput="atualizarItemEvento(\'projetos\',' + idx + ',\'nome\',this.value)" class="form-input flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +   '<button type="button" onclick="removerProjetoEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1"><i class="bi bi-trash3"></i></button>'
+      + '</div>'
+      + '<textarea placeholder="Descrição (opcional)" oninput="atualizarItemEvento(\'projetos\',' + idx + ',\'descricao\',this.value)" class="form-textarea w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white resize-y min-h-[50px]">' + esc(p.descricao) + '</textarea>'
+      + '</div>';
+  }).join('');
+}
+
+// ---- Step 4: Turmas (criação inline, ano = ano do evento) ----
+
+function adicionarTurmaEvento() {
+  eventoState.turmas.push({ existing: false, id: null, nome: '', curso: '' });
+  renderTurmasEvento();
+}
+
+function removerTurmaEvento(idx) {
+  eventoState.turmas.splice(idx, 1);
+  renderTurmasEvento();
+}
+
+function renderTurmasEvento() {
+  const container = document.getElementById('evento-turmas-lista');
+  if (!eventoState.turmas.length) {
+    container.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">Nenhuma turma adicionada ainda.</p>';
+    return;
+  }
+  container.innerHTML = eventoState.turmas.map(function(t, idx) {
+    if (t.existing) {
+      return '<div class="flex items-center gap-2 bg-g50 border border-g100 rounded-lg p-2.5">'
+        + '<i class="bi bi-mortarboard text-g700"></i>'
+        + '<div class="flex-1">'
+        +   '<span class="text-sm font-medium text-gray-900">' + esc(t.nome) + '</span>'
+        +   '<span class="text-xs text-gray-400 ml-2">' + esc(t.curso || '') + (t.ano ? ' · ' + t.ano : '') + '</span>'
+        + '</div>'
+        + '<span class="text-[10px] text-g700 bg-white border border-g100 px-1.5 py-0.5 rounded shrink-0">vinculado</span>'
+        + '<button type="button" onclick="removerTurmaEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1"><i class="bi bi-x-lg"></i></button>'
+        + '</div>';
+    }
+    return '<div class="border border-gray-200 rounded-lg p-2.5 bg-white">'
+      + '<div class="flex items-start gap-2">'
+      +   '<div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">'
+      +     '<input type="text" placeholder="Nome da turma" value="' + esc(t.nome) + '" oninput="atualizarItemEvento(\'turmas\',' + idx + ',\'nome\',this.value)" class="form-input px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +     '<input type="text" placeholder="Curso" value="' + esc(t.curso) + '" oninput="atualizarItemEvento(\'turmas\',' + idx + ',\'curso\',this.value)" class="form-input px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +   '</div>'
+      +   '<button type="button" onclick="removerTurmaEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1 mt-1.5"><i class="bi bi-trash3"></i></button>'
+      + '</div></div>';
+  }).join('');
+}
+
+// ---- Step 5: Responsáveis (criação inline) ----
+
+function adicionarResponsavelEvento() {
+  eventoState.responsaveis.push({ existing: false, id: null, nome: '', email: '', categoria: 'estudante' });
+  renderResponsaveisEvento();
+}
+
+function removerResponsavelEvento(idx) {
+  eventoState.responsaveis.splice(idx, 1);
+  renderResponsaveisEvento();
+}
+
+function renderResponsaveisEvento() {
+  const container = document.getElementById('evento-responsaveis-lista');
+  if (!eventoState.responsaveis.length) {
+    container.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">Nenhum responsável adicionado ainda.</p>';
+    return;
+  }
+  container.innerHTML = eventoState.responsaveis.map(function(r, idx) {
+    if (r.existing) {
+      return '<div class="flex items-center gap-2 bg-g50 border border-g100 rounded-lg p-2.5">'
+        + '<i class="bi bi-person-circle text-g700"></i>'
+        + '<div class="flex-1">'
+        +   '<span class="text-sm font-medium text-gray-900">' + esc(r.nome) + '</span>'
+        +   '<span class="text-xs text-gray-400 ml-2">' + (RESP_TIPO_LABELS[r.categoria] || r.categoria) + '</span>'
+        + '</div>'
+        + '<span class="text-[10px] text-g700 bg-white border border-g100 px-1.5 py-0.5 rounded shrink-0">vinculado</span>'
+        + '<button type="button" onclick="removerResponsavelEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1"><i class="bi bi-x-lg"></i></button>'
+        + '</div>';
+    }
+    const opts = ['estudante','professor','coordenador','externo'].map(function(cat) {
+      return '<option value="' + cat + '" ' + (r.categoria === cat ? 'selected' : '') + '>' + RESP_TIPO_LABELS[cat] + '</option>';
+    }).join('');
+    return '<div class="border border-gray-200 rounded-lg p-2.5 bg-white">'
+      + '<div class="flex items-start gap-2">'
+      +   '<div class="flex-1 grid grid-cols-1 sm:grid-cols-[1.2fr_1.4fr_1fr] gap-2">'
+      +     '<input type="text" placeholder="Nome" value="' + esc(r.nome) + '" oninput="atualizarItemEvento(\'responsaveis\',' + idx + ',\'nome\',this.value)" class="form-input px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +     '<input type="email" placeholder="Email" value="' + esc(r.email) + '" oninput="atualizarItemEvento(\'responsaveis\',' + idx + ',\'email\',this.value)" class="form-input px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">'
+      +     '<select onchange="atualizarItemEvento(\'responsaveis\',' + idx + ',\'categoria\',this.value)" class="form-select px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">' + opts + '</select>'
+      +   '</div>'
+      +   '<button type="button" onclick="removerResponsavelEvento(' + idx + ')" class="text-red-500 hover:text-red-700 px-1 mt-1.5"><i class="bi bi-trash3"></i></button>'
+      + '</div></div>';
+  }).join('');
+}
+
+// ---- Abrir / Editar / Salvar evento ----
+
 async function openModalEvento() {
   document.getElementById('titulo-modal-evento').textContent = 'Criar Evento';
-  document.getElementById('evento-id').value     = '';
-  document.getElementById('evento-nome').value   = '';
-  document.getElementById('evento-data').value   = '';
-  document.getElementById('evento-status').value = 'rascunho';
+  document.getElementById('evento-id').value          = '';
+  document.getElementById('evento-nome').value        = '';
+  document.getElementById('evento-descricao').value   = '';
+  document.getElementById('evento-data-inicio').value = '';
+  document.getElementById('evento-hora-inicio').value = '';
+  document.getElementById('evento-data-fim').value    = '';
+  document.getElementById('evento-hora-fim').value    = '';
+  document.getElementById('evento-status').value      = 'agendado';
+  document.getElementById('evento-data-erro').classList.add('hidden');
+
+  eventoResetState();
   await popularSelect('evento-usuario', 'usuarios', 'id_usuario', 'nome');
+
+  renderEspacosEvento();
+  renderProjetosEvento();
+  renderTurmasEvento();
+  renderResponsaveisEvento();
+
+  eventoGoToStep(1);
   openModal('modal-evento');
 }
 
 async function editarEvento(id) {
-  const res = await get(`eventos/${id}`);
+  const res = await get('eventos/' + id);
   if (!res.sucesso) { toast('Erro ao carregar evento', 'err'); return; }
   const e = res.dados;
+
   document.getElementById('titulo-modal-evento').textContent = 'Editar Evento';
-  document.getElementById('evento-id').value     = e.id_evento;
-  document.getElementById('evento-nome').value   = e.nome;
-  document.getElementById('evento-data').value   = e.data;
-  document.getElementById('evento-status').value = e.status;
+  document.getElementById('evento-id').value          = e.id_evento;
+  document.getElementById('evento-nome').value        = e.nome;
+  document.getElementById('evento-descricao').value   = e.descricao || '';
+  document.getElementById('evento-data-inicio').value = e.data     ? e.data.substring(0,10)     : '';
+  document.getElementById('evento-hora-inicio').value = e.hora_inicio ? e.hora_inicio.substring(0,5) : '';
+  document.getElementById('evento-data-fim').value    = e.data_fim ? e.data_fim.substring(0,10) : (e.data ? e.data.substring(0,10) : '');
+  document.getElementById('evento-hora-fim').value    = e.hora_fim    ? e.hora_fim.substring(0,5)    : '';
+  document.getElementById('evento-status').value      = e.status;
+  document.getElementById('evento-data-erro').classList.add('hidden');
+
+  eventoResetState();
+  eventoState.espacos = (e.espacos || []).map(function(s) {
+    return { existing: true, id: s.id_espaco, nome: s.nome, tipo: s.tipo, capacidade_max: (s.capacidade_max ?? s.capaciade) };
+  });
+  eventoState.projetos = (e.projetos || []).map(function(p) {
+    return { existing: true, id: p.id_projeto, nome: p.nome, descricao: p.descricao };
+  });
+  eventoState.turmas = (e.turmas || []).map(function(t) {
+    return { existing: true, id: t.id_turma, nome: t.nome, curso: t.curso, ano: t.ano };
+  });
+  eventoState.responsaveis = (e.responsaveis || []).map(function(r) {
+    return { existing: true, id: r.id_participacao, nome: r.nome, email: r.email, categoria: r.categoria };
+  });
+
   await popularSelect('evento-usuario', 'usuarios', 'id_usuario', 'nome', e.id_usuario_criado);
+
+  renderEspacosEvento();
+  renderProjetosEvento();
+  renderTurmasEvento();
+  renderResponsaveisEvento();
+
+  eventoGoToStep(1);
   openModal('modal-evento');
 }
 
 async function salvarEvento() {
-  const id    = document.getElementById('evento-id').value;
+  if (!eventoValidarStep1()) { eventoGoToStep(1); return; }
+
+  const id         = document.getElementById('evento-id').value;
+  const dataInicio = document.getElementById('evento-data-inicio').value;
+  const anoEvento  = new Date(dataInicio + 'T00:00').getFullYear();
+
   const dados = {
     nome:              document.getElementById('evento-nome').value.trim(),
-    data:              document.getElementById('evento-data').value,
+    descricao:         document.getElementById('evento-descricao').value.trim(),
+    data:              dataInicio,
+    hora_inicio:       document.getElementById('evento-hora-inicio').value || null,
+    data_fim:          document.getElementById('evento-data-fim').value,
+    hora_fim:          document.getElementById('evento-hora-fim').value || null,
     status:            document.getElementById('evento-status').value,
     id_usuario_criado: document.getElementById('evento-usuario').value,
   };
-  if (!dados.nome || !dados.data || !dados.id_usuario_criado) {
-    toast('Preencha todos os campos obrigatórios', 'err'); return;
-  }
+
   const res = id
-    ? await put(`eventos/${id}`, dados)
+    ? await put('eventos/' + id, dados)
     : await post('eventos', dados);
-  if (res.sucesso) {
-    closeModal('modal-evento');
-    toast(id ? 'Evento atualizado!' : 'Evento criado!');
-    carregarEventos();
-    carregarDashboard();
-  } else {
-    toast(res.erro || 'Erro ao salvar', 'err');
+
+  if (!res.sucesso) { toast(res.erro || 'Erro ao salvar', 'err'); return; }
+
+  const idEvento = parseInt(id || res.dados?.id_evento);
+
+  // ---- Espaços: cria os novos e sincroniza o vínculo (com capacidade) ----
+  const espacosFinal = [];
+  for (const esp of eventoState.espacos) {
+    if (esp.existing) {
+      espacosFinal.push({ id_espaco: esp.id, capacidade_max: esp.capacidade_max ? parseInt(esp.capacidade_max) : null });
+    } else if ((esp.nome || '').trim()) {
+      const r = await post('espacos', {
+        nome:      esp.nome.trim(),
+        tipo:      esp.tipo || 'sala',
+        capaciade: esp.capacidade_max ? parseInt(esp.capacidade_max) : 0,
+        status:    'ativo',
+      });
+      if (r.sucesso) {
+        espacosFinal.push({ id_espaco: r.dados.id_espaco, capacidade_max: esp.capacidade_max ? parseInt(esp.capacidade_max) : null });
+      }
+    }
   }
+  await post('relacoes', { tabela: 'utiliza', id_evento: idEvento, espacos: espacosFinal });
+
+  // ---- Projetos: cria os novos e sincroniza o vínculo ----
+  const projetosFinal = [];
+  for (const p of eventoState.projetos) {
+    if (p.existing) {
+      projetosFinal.push(parseInt(p.id));
+    } else if ((p.nome || '').trim()) {
+      const r = await post('projetos', { nome: p.nome.trim(), descricao: (p.descricao || '').trim() });
+      if (r.sucesso) projetosFinal.push(parseInt(r.dados.id_projeto));
+    }
+  }
+  await post('relacoes', { tabela: 'evento_projeto', id_evento: idEvento, projetos: projetosFinal });
+
+  // ---- Turmas: cria as novas (ano = ano do evento) e sincroniza o vínculo ----
+  const turmasFinal = [];
+  for (const t of eventoState.turmas) {
+    if (t.existing) {
+      turmasFinal.push(parseInt(t.id));
+    } else if ((t.nome || '').trim()) {
+      const r = await post('turmas', { nome: t.nome.trim(), curso: (t.curso || '').trim(), ano: anoEvento });
+      if (r.sucesso) turmasFinal.push(parseInt(r.dados.id_turma));
+    }
+  }
+  await post('relacoes', { tabela: 'evento_turma', id_evento: idEvento, turmas: turmasFinal });
+
+  // ---- Responsáveis: cria os novos e sincroniza o vínculo ----
+  const responsaveisFinal = [];
+  for (const r0 of eventoState.responsaveis) {
+    if (r0.existing) {
+      responsaveisFinal.push(parseInt(r0.id));
+    } else if ((r0.nome || '').trim() && (r0.email || '').trim()) {
+      const r = await post('participantes', {
+        nome:      r0.nome.trim(),
+        email:     r0.email.trim(),
+        categoria: r0.categoria || 'estudante',
+        id_evento: idEvento,
+      });
+      if (r.sucesso) responsaveisFinal.push(parseInt(r.dados.id_participacao));
+    }
+  }
+  await post('relacoes', { tabela: 'evento_responsavel', id_evento: idEvento, participantes: responsaveisFinal });
+
+  closeModal('modal-evento');
+  toast(id ? 'Evento atualizado!' : 'Evento criado!');
+
+  carregarEventos();
+  carregarDashboard();
+  if (document.getElementById('page-espacos')?.classList.contains('active'))       carregarEspacos();
+  if (document.getElementById('page-projetos')?.classList.contains('active'))      carregarProjetos();
+  if (document.getElementById('page-turmas')?.classList.contains('active'))        carregarTurmas();
+  if (document.getElementById('page-participantes')?.classList.contains('active')) carregarParticipantes();
 }
 
 function excluirEvento(id, nome) {
@@ -407,11 +802,12 @@ async function carregarProjetos() {
   </table>`);
 }
 
-function openModalProjeto() {
+async function openModalProjeto() {
   document.getElementById('titulo-modal-projeto').textContent = 'Cadastrar Projeto';
   document.getElementById('projeto-id').value = '';
   document.getElementById('proj-nome').value  = '';
   document.getElementById('proj-desc').value  = '';
+  await carregarTurmasModal([]);
   openModal('modal-projeto');
 }
 
@@ -423,6 +819,8 @@ async function editarProjeto(id) {
   document.getElementById('projeto-id').value = p.id_projeto;
   document.getElementById('proj-nome').value  = p.nome;
   document.getElementById('proj-desc').value  = p.descricao || '';
+  const ids = (p.turmas_ids || []).map(t => t.id_turma || t);
+  await carregarTurmasModal(ids);
   openModal('modal-projeto');
 }
 
@@ -436,14 +834,46 @@ async function salvarProjeto() {
   const res = id
     ? await put(`projetos/${id}`, dados)
     : await post('projetos', dados);
-  if (res.sucesso) {
-    closeModal('modal-projeto');
-    toast(id ? 'Projeto atualizado!' : 'Projeto criado!');
-    carregarProjetos();
-    carregarDashboard();
-  } else {
-    toast(res.erro || 'Erro', 'err');
+  if (!res.sucesso) { toast(res.erro || 'Erro', 'err'); return; }
+
+  const idProjeto = id || res.dados?.id_projeto;
+  const checks = document.querySelectorAll('#proj-turmas-lista input[type="checkbox"]:checked');
+  const turmas  = Array.from(checks).map(cb => parseInt(cb.value));
+
+  if (idProjeto) {
+    await post('relacoes', {
+      tabela:     'apresenta',
+      id_projeto: parseInt(idProjeto),
+      turmas:     turmas,
+    });
   }
+
+  closeModal('modal-projeto');
+  toast(id ? 'Projeto atualizado!' : 'Projeto criado!');
+  carregarProjetos();
+  carregarDashboard();
+}
+
+async function carregarTurmasModal(selecionadas = []) {
+  const container = document.getElementById('proj-turmas-lista');
+  if (!container) return;
+  container.innerHTML = '<p class="text-xs text-gray-400">Carregando...</p>';
+  const res = await get('turmas');
+  if (!res.sucesso || !res.dados.length) {
+    container.innerHTML = '<p class="text-xs text-gray-400">Nenhuma turma cadastrada.</p>';
+    return;
+  }
+  container.innerHTML = res.dados.map(t =>
+    '<label class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white cursor-pointer">'
+    + '<input type="checkbox" value="' + t.id_turma + '" '
+    + (selecionadas.includes(t.id_turma) ? 'checked' : '')
+    + ' class="w-4 h-4 accent-g700">'
+    + '<div>'
+    + '<span class="text-sm font-medium text-gray-900">' + t.nome + '</span>'
+    + '<span class="text-xs text-gray-400 ml-2">' + t.curso + ' — ' + t.ano + '</span>'
+    + '</div>'
+    + '</label>'
+  ).join('');
 }
 
 function excluirProjeto(id, nome) {
@@ -712,6 +1142,107 @@ function excluirProgamacao(id, nome) {
       ? (toast('Atividade excluída!'), carregarProgramacao())
       : toast(res.erro || 'Erro', 'err');
   });
+}
+
+async function filtrarRelatorioEventos() {
+  const inicio = document.getElementById('rel-data-inicio')?.value || '';
+  const fim    = document.getElementById('rel-data-fim')?.value    || '';
+  const status = document.getElementById('rel-status')?.value      || '';
+  const espaco = document.getElementById('rel-espaco')?.value      || '';
+
+  let ep = 'eventos?';
+  if (inicio) ep += 'data_inicio=' + inicio + '&';
+  if (fim)    ep += 'data_fim='    + fim    + '&';
+  if (status) ep += 'status='      + encodeURIComponent(status) + '&';
+  if (espaco) ep += 'id_espaco='   + espaco + '&';
+
+  const res = await get(ep);
+  const el  = document.getElementById('tabela-rel-eventos');
+  if (!el) return;
+
+  if (!res.sucesso || !res.dados.length) {
+    el.innerHTML = '<p class="text-xs text-gray-500 text-center py-4">Nenhum evento encontrado.</p>';
+    return;
+  }
+
+  el.innerHTML = '<div class="overflow-x-auto mt-3">'
+    + '<table class="w-full border-collapse text-xs">'
+    + '<thead class="bg-g50"><tr>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Nome</th>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Data</th>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Status</th>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Criado por</th>'
+    + '</tr></thead><tbody>'
+    + res.dados.map(function(e) {
+        return '<tr class="border-b border-gray-100 hover:bg-gray-50">'
+          + '<td class="px-3 py-2 font-medium">' + e.nome + '</td>'
+          + '<td class="px-3 py-2">' + fmt(e.data) + '</td>'
+          + '<td class="px-3 py-2">' + badge(e.status) + '</td>'
+          + '<td class="px-3 py-2">' + (e.criado_por || '—') + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>'
+    + '<p class="text-[10px] text-gray-400 text-right mt-1">Total: ' + res.dados.length + ' evento(s)</p>'
+    + '</div>';
+}
+
+async function filtrarRelatorioProjetos() {
+  const idSelecionado = document.getElementById('rel-projeto-id')?.value || '';
+  const busca         = idSelecionado ? '' : (document.getElementById('rel-busca-projeto')?.value || '');
+  const turma         = document.getElementById('rel-turma')?.value || '';
+
+  let ep = 'projetos?busca=' + encodeURIComponent(busca);
+  if (turma) ep += '&id_turma=' + turma;
+
+  const res = await get(ep);
+  const el  = document.getElementById('tabela-rel-projetos');
+  if (!el) return;
+
+  var dados = res.dados || [];
+  if (idSelecionado) {
+    dados = dados.filter(function(p) { return String(p.id_projeto) === String(idSelecionado); });
+  }
+
+  if (!res.sucesso || !dados.length) {
+    el.innerHTML = '<p class="text-xs text-gray-500 text-center py-4">Nenhum projeto encontrado.</p>';
+    return;
+  }
+
+  el.innerHTML = '<div class="overflow-x-auto mt-3">'
+    + '<table class="w-full border-collapse text-xs">'
+    + '<thead class="bg-g50"><tr>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Nome</th>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Descrição</th>'
+    + '<th class="text-left px-3 py-2 font-semibold text-g700 border-b">Turmas</th>'
+    + '</tr></thead><tbody>'
+    + dados.map(function(p) {
+        return '<tr class="border-b border-gray-100 hover:bg-gray-50">'
+          + '<td class="px-3 py-2 font-medium">' + p.nome + '</td>'
+          + '<td class="px-3 py-2">' + (p.descricao || '—') + '</td>'
+          + '<td class="px-3 py-2">' + (p.turmas || '—') + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>'
+    + '<p class="text-[10px] text-gray-400 text-right mt-1">Total: ' + dados.length + ' projeto(s)</p>'
+    + '</div>';
+}
+
+function gerarPdfEventos() {
+  var inicio = document.getElementById('rel-data-inicio')?.value || '';
+  var fim    = document.getElementById('rel-data-fim')?.value    || '';
+  var status = document.getElementById('rel-status')?.value      || '';
+  var espaco = document.getElementById('rel-espaco')?.value      || '';
+  window.open(API + '/relatorio/eventos-pdf?data_inicio=' + inicio + '&data_fim=' + fim + '&status=' + encodeURIComponent(status) + '&id_espaco=' + espaco, '_blank');
+}
+
+function gerarPdfProjetos() {
+  var busca = document.getElementById('rel-busca-projeto')?.value || '';
+  var turma = document.getElementById('rel-turma')?.value         || '';
+  window.open(API + '/relatorio/projetos-pdf?busca=' + encodeURIComponent(busca) + '&id_turma=' + turma, '_blank');
+}
+
+function gerarPdfDashboard() {
+  window.open(API + '/relatorio/dashboard-pdf', '_blank');
 }
 
 renderCal([]);

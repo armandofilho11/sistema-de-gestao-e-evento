@@ -21,74 +21,82 @@ require_once __DIR__ . '/../app/controllers/ProjetoController.php';
 require_once __DIR__ . '/../app/controllers/ProgamacaoController.php';
 require_once __DIR__ . '/../app/controllers/DashboardController.php';
 require_once __DIR__ . '/../app/controllers/RelacoesController.php';
+require_once __DIR__ . '/../app/controllers/RelatorioController.php';
 
-$uri = $_GET['route'] 
-    ?? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$uri = rtrim(str_replace('/sistema-de-gestao-e-evento/public', '', $uri), '/');
-$method = metodo();
+$uri    = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$uri    = str_replace('/sistema-de-gestao-e-evento/public', '', $uri);
+$uri    = str_replace('/index.php', '', $uri);
+$uri    = rtrim($uri, '/');
+if ($uri === '') $uri = '/';
+
+$method = $_SERVER['REQUEST_METHOD'];
 
 $routes = [
-    'POST /auth/login'    => [AuthController::class,        'login'],
-    'POST /auth/logout'   => [AuthController::class,        'logout'],
-    'GET  /auth/me'       => [AuthController::class,        'me'],
+    'POST   /auth/login'              => [AuthController::class,      'login'],
+    'POST   /auth/logout'             => [AuthController::class,      'logout'],
+    'GET    /auth/me'                 => [AuthController::class,      'me'],
 
-    'GET    /usuarios'    => [UsuarioController::class,     'index'],
-    'GET    /usuarios/{id}' => [UsuarioController::class,   'show'],
-    'POST   /usuarios'    => [UsuarioController::class,     'store'],
-    'PUT    /usuarios/{id}' => [UsuarioController::class,   'update'],
-    'DELETE /usuarios/{id}' => [UsuarioController::class,   'destroy'],
+    'GET    /usuarios'                => [UsuarioController::class,   'index'],
+    'GET    /usuarios/{id}'           => [UsuarioController::class,   'show'],
+    'POST   /usuarios'                => [UsuarioController::class,   'store'],
+    'PUT    /usuarios/{id}'           => [UsuarioController::class,   'update'],
+    'DELETE /usuarios/{id}'           => [UsuarioController::class,   'destroy'],
 
-    'GET    /eventos'     => [EventoController::class,      'index'],
-    'GET    /eventos/{id}'=> [EventoController::class,      'show'],
-    'POST   /eventos'     => [EventoController::class,      'store'],
-    'PUT    /eventos/{id}'=> [EventoController::class,      'update'],
-    'DELETE /eventos/{id}'=> [EventoController::class,      'destroy'],
+    'GET    /eventos'                 => [EventoController::class,    'index'],
+    'GET    /eventos/{id}'            => [EventoController::class,    'show'],
+    'POST   /eventos'                 => [EventoController::class,    'store'],
+    'PUT    /eventos/{id}'            => [EventoController::class,    'update'],
+    'DELETE /eventos/{id}'            => [EventoController::class,    'destroy'],
 
-    'GET    /participantes'       => [ParticipanteController::class, 'index'],
-    'GET    /participantes/{id}'  => [ParticipanteController::class, 'show'],
-    'POST   /participantes'       => [ParticipanteController::class, 'store'],
-    'PUT    /participantes/{id}'  => [ParticipanteController::class, 'update'],
-    'DELETE /participantes/{id}'  => [ParticipanteController::class, 'destroy'],
+    'GET    /participantes'           => [ParticipanteController::class, 'index'],
+    'GET    /participantes/{id}'      => [ParticipanteController::class, 'show'],
+    'POST   /participantes'           => [ParticipanteController::class, 'store'],
+    'PUT    /participantes/{id}'      => [ParticipanteController::class, 'update'],
+    'DELETE /participantes/{id}'      => [ParticipanteController::class, 'destroy'],
 
-    'GET    /espacos'     => [EspacoController::class,      'index'],
-    'GET    /espacos/{id}'=> [EspacoController::class,      'show'],
-    'POST   /espacos'     => [EspacoController::class,      'store'],
-    'PUT    /espacos/{id}'=> [EspacoController::class,      'update'],
-    'DELETE /espacos/{id}'=> [EspacoController::class,      'destroy'],
+    'GET    /espacos'                 => [EspacoController::class,    'index'],
+    'GET    /espacos/{id}'            => [EspacoController::class,    'show'],
+    'POST   /espacos'                 => [EspacoController::class,    'store'],
+    'PUT    /espacos/{id}'            => [EspacoController::class,    'update'],
+    'DELETE /espacos/{id}'            => [EspacoController::class,    'destroy'],
 
-    'GET    /turmas'      => [TurmaController::class,       'index'],
-    'GET    /turmas/{id}' => [TurmaController::class,       'show'],
-    'POST   /turmas'      => [TurmaController::class,       'store'],
-    'PUT    /turmas/{id}' => [TurmaController::class,       'update'],
-    'DELETE /turmas/{id}' => [TurmaController::class,       'destroy'],
+    'GET    /turmas'                  => [TurmaController::class,     'index'],
+    'GET    /turmas/{id}'             => [TurmaController::class,     'show'],
+    'POST   /turmas'                  => [TurmaController::class,     'store'],
+    'PUT    /turmas/{id}'             => [TurmaController::class,     'update'],
+    'DELETE /turmas/{id}'             => [TurmaController::class,     'destroy'],
 
-    'GET    /projetos'      => [ProjetoController::class,   'index'],
-    'GET    /projetos/{id}' => [ProjetoController::class,   'show'],
-    'POST   /projetos'      => [ProjetoController::class,   'store'],
-    'PUT    /projetos/{id}' => [ProjetoController::class,   'update'],
-    'DELETE /projetos/{id}' => [ProjetoController::class,   'destroy'],
+    'GET    /projetos'                => [ProjetoController::class,   'index'],
+    'GET    /projetos/{id}'           => [ProjetoController::class,   'show'],
+    'POST   /projetos'                => [ProjetoController::class,   'store'],
+    'PUT    /projetos/{id}'           => [ProjetoController::class,   'update'],
+    'DELETE /projetos/{id}'           => [ProjetoController::class,   'destroy'],
 
-    'GET    /progamacao'      => [ProgamacaoController::class, 'index'],
-    'GET    /progamacao/{id}' => [ProgamacaoController::class, 'show'],
-    'POST   /progamacao'      => [ProgamacaoController::class, 'store'],
-    'PUT    /progamacao/{id}' => [ProgamacaoController::class, 'update'],
-    'DELETE /progamacao/{id}' => [ProgamacaoController::class, 'destroy'],
+    'GET    /progamacao'              => [ProgamacaoController::class,'index'],
+    'GET    /progamacao/{id}'         => [ProgamacaoController::class,'show'],
+    'POST   /progamacao'              => [ProgamacaoController::class,'store'],
+    'PUT    /progamacao/{id}'         => [ProgamacaoController::class,'update'],
+    'DELETE /progamacao/{id}'         => [ProgamacaoController::class,'destroy'],
 
-    'GET  /relacoes'  => [RelacoesController::class,        'index'],
-    'POST /relacoes'  => [RelacoesController::class,        'store'],
-    'DELETE /relacoes'=> [RelacoesController::class,        'destroy'],
+    'GET    /relacoes'                => [RelacoesController::class,  'index'],
+    'POST   /relacoes'                => [RelacoesController::class,  'store'],
+    'DELETE /relacoes'                => [RelacoesController::class,  'destroy'],
 
-    'GET /dashboard'  => [DashboardController::class,       'index'],
+    'GET    /dashboard'               => [DashboardController::class, 'index'],
+
+    'GET    /relatorio/eventos-pdf'   => [RelatorioController::class, 'eventosPdf'],
+    'GET    /relatorio/projetos-pdf'  => [RelatorioController::class, 'projetosPdf'],
+    'GET    /relatorio/dashboard-pdf' => [RelatorioController::class, 'dashboardPdf'],
 ];
 
 function dispatch(array $routes, string $method, string $uri): void {
     foreach ($routes as $route => $handler) {
-        [$routeMethod, $routePath] = explode(' ', $route, 2);
+        [$routeMethod, $routePath] = explode(' ', trim($route), 2);
+        $routePath = trim($routePath);
+        $pattern   = preg_replace('/\{[^}]+\}/', '([^/]+)', $routePath);
+        $pattern   = "#^{$pattern}$#";
 
-        $pattern = preg_replace('/\{[^}]+\}/', '([^/]+)', $routePath);
-        $pattern = "#^{$pattern}$#";
-
-        if ($routeMethod === $method && preg_match($pattern, $uri, $matches)) {
+        if (trim($routeMethod) === $method && preg_match($pattern, $uri, $matches)) {
             array_shift($matches);
             [$class, $action] = $handler;
             $controller = new $class();

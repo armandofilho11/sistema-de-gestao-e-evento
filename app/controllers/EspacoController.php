@@ -24,8 +24,8 @@ class EspacoController {
 
         if (!$nome)          erro('Nome é obrigatório');
         if ($capaciade <= 0) erro('Capacidade deve ser maior que zero');
-        if (!in_array($tipo,   ['sala','auditorio','laboratorio','outro'])) erro('Tipo inválido');
-        if (!in_array($status, ['ativo','inativo','manutencao']))           erro('Status inválido');
+        if (!in_array($tipo,   ['sala','auditorio','laboratorio','quadra','outro'])) erro('Tipo inválido');
+        if (!in_array($status, ['ativo','inativo','manutencao']))                    erro('Status inválido');
 
         $id = $this->model->criar($nome, $tipo, $capaciade, $status);
         created(['id_espaco' => $id, 'nome' => $nome, 'tipo' => $tipo]);
